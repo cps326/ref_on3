@@ -11,7 +11,6 @@ import json
 import streamlit as st
 import io
 import xlsxwriter
-import getpass
 from dotenv import load_dotenv
 from urllib.parse import urljoin
 from urllib.parse import urlparse
@@ -20,14 +19,13 @@ import base64
 from playwright.sync_api import sync_playwright
 
 # =========================
-# NEW: Reference popup image
+# Reference image (ROOT)
 # =========================
-REF_POP_PATH = "ref_pop.png"   # <- 파일명 ref_pop.png (assets 폴더에 두는 것을 권장)
+REF_POP_PATH = "ref_pop.png"
 
 # ---------- API Key handling (Cloud-safe) ----------
 load_dotenv(".env")
 
-# Prefer Streamlit secrets if present
 api_key = None
 try:
     if "OPENAI_API_KEY" in st.secrets:
@@ -35,11 +33,9 @@ try:
 except Exception:
     pass
 
-# Then env var
 if not api_key:
     api_key = os.environ.get("OPENAI_API_KEY")
 
-# As last resort, ask user via UI (works on Streamlit Cloud)
 if not api_key:
     st.sidebar.warning("OPENAI_API_KEY가 설정되지 않았습니다. 사이드바에서 입력해주세요.")
     api_key = st.sidebar.text_input("OpenAI API Key", type="password")
@@ -54,7 +50,12 @@ aclient = AsyncOpenAI(api_key=api_key)
 # Keep Sync client for fallback visual verification (Playwright is sync here)
 start_client = OpenAI(api_key=api_key)
 
-st.set_page_config(layout="wide", page_title="연구보고서 온라인자료 검증도구", page_icon="assets/logo.png")
+st.set_page_config(
+    layout="wide",
+    page_title="연구보고서 온라인자료 검증도구",
+    page_icon="assets/logo.png",
+    initial_sidebar_state="expanded",
+)
 
 # --- UI Customization (KEI Branding) ---
 KEI_BLUE = "#2a9df4"
@@ -63,7 +64,6 @@ KEI_GRAY = "#666666"
 
 st.markdown(f"""
     <style>
-        /* 1. Reset Top Spacing: Remove whitespace at the very top */
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
@@ -71,29 +71,21 @@ st.markdown(f"""
         header {{
             visibility: hidden;
         }}
-        
-        /* 2. Background Decoration */
         [data-testid="stAppViewContainer"] {{
             background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%);
         }}
         [data-testid="stHeader"] {{
             background-color: transparent !important;
         }}
-
-        /* 3. Text & Content Styling */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, li, div, label {{
             color: #333333 !important;
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }}
-        
-        /* Main Header */
         h1 {{
             color: {KEI_TEAL} !important;
             font-weight: 800;
             margin-top: 0 !important;
         }}
-        
-        /* Buttons */
         .stButton>button {{
             background: linear-gradient(90deg, {KEI_TEAL} 0%, {KEI_BLUE} 100%);
             color: white !important;
@@ -107,21 +99,15 @@ st.markdown(f"""
             transform: scale(1.02);
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }}
-
-        /* Dataframe */
         [data-testid="stDataFrame"] th {{
             background-color: {KEI_TEAL} !important;
             color: white !important;
         }}
-        
-        /* Input Fields - White Bg for readability */
         .stTextArea textarea {{
             background-color: #ffffff !important;
             color: #333333 !important;
             border: 1px solid #ddd;
         }}
-        
-        /* File Uploader - White Background */
         [data-testid="stFileUploader"] section {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -129,8 +115,6 @@ st.markdown(f"""
         [data-testid="stFileUploader"] span {{
             color: #333333 !important;
         }}
-        
-        /* Status Widget -- Dark Background */
         [data-testid="stStatusWidget"] {{
             background-color: #4a4a4a !important;
             border: 1px solid #ddd;
@@ -148,8 +132,6 @@ st.markdown(f"""
             fill: #ffffff !important;
             color: #ffffff !important;
         }}
-        
-        /* Custom Result Box */
         .result-box {{
             background-color: #ffffff;
             border: 1px solid #ddd;
@@ -161,8 +143,6 @@ st.markdown(f"""
             font-weight: bold;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }}
-
-        /* Download Button - Ghost Style */
         [data-testid="stBaseButton-secondary"], .stDownloadButton button {{
             background-color: #ffffff !important;
             color: {KEI_TEAL} !important;
@@ -173,8 +153,6 @@ st.markdown(f"""
             border: 1px solid {KEI_BLUE} !important;
             color: {KEI_BLUE} !important;
         }}
-        
-        /* Top Right Toolbar */
         [data-testid="stToolbar"] {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -202,31 +180,35 @@ GPT_MODEL_VISION = "gpt-5-nano"
 
 
 # =========================
-# NEW: Sidebar reference UI (both modes)
+# NEW: Big reference viewer on MAIN
 # =========================
-@st.dialog("📘 참고문헌 편람")
-def show_ref_popup():
-    if os.path.exists(REF_POP_PATH):
-        st.image(REF_POP_PATH, use_container_width=True)
-    else:
-        st.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
-    st.button("닫기")
+def sidebar_controls():
+    st.sidebar.markdown("## 📌 참고자료(편람)")
 
-def render_reference_sidebar():
-    st.sidebar.markdown("## 📌 참고자료")
-    st.sidebar.caption("ref_pop.png를 참고문헌 양식 검토용으로 표시합니다.")
+    # session_state default
+    if "show_ref" not in st.session_state:
+        st.session_state["show_ref"] = False
 
-    # (A) Sidebar button -> modal popup
-    if st.sidebar.button("🔍 편람 팝업으로 보기"):
-        show_ref_popup()
+    st.session_state["show_ref"] = st.sidebar.checkbox(
+        "편람(이미지) 메인에 크게 보기",
+        value=st.session_state["show_ref"]
+    )
 
-    # (B) Sidebar panel -> show in sidebar
-    show_in_sidebar = st.sidebar.checkbox("🧷 사이드바에 편람 고정 표시", value=False)
-    if show_in_sidebar:
+    st.sidebar.caption("※ 사이드바를 접어도, 메인에 열린 편람은 그대로 남습니다.")
+
+
+def render_reference_main():
+    """
+    Main area big viewer. If user toggles on, show image in an expander (big).
+    """
+    if not st.session_state.get("show_ref", False):
+        return
+
+    with st.expander("📘 참고문헌 편람 (크게 보기)", expanded=True):
         if os.path.exists(REF_POP_PATH):
-            st.sidebar.image(REF_POP_PATH, use_container_width=True)
+            st.image(REF_POP_PATH, use_container_width=True)
         else:
-            st.sidebar.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
+            st.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
 
 
 def remove_duplicate_words(text):
@@ -262,7 +244,7 @@ async def crawling_async(session, url):
                     if not redirect_url.startswith("http"):
                         redirect_url = urljoin(url, redirect_url)
                     async with session.get(redirect_url, headers=headers, ssl=False, timeout=30) as response2:
-                         response_text += await response2.text()
+                        response_text += await response2.text()
 
             if response.status == 200:
                 soup = BeautifulSoup(response_text, 'html.parser')
@@ -276,14 +258,14 @@ async def crawling_async(session, url):
                         iframe_url = urljoin(url, iframe_src)
                         parsed = urlparse(iframe_url)
                         if parsed.scheme in ('http', 'https'):
-                           try:
-                               async with session.get(iframe_url, headers=headers, ssl=False, timeout=10) as iframe_resp:
-                                   if iframe_resp.status == 200:
-                                       iframe_text = await iframe_resp.text()
-                                       iframe_soup = BeautifulSoup(iframe_text, 'html.parser')
-                                       iframe_contents.append(iframe_soup.get_text(strip=True))
-                           except:
-                               pass
+                            try:
+                                async with session.get(iframe_url, headers=headers, ssl=False, timeout=10) as iframe_resp:
+                                    if iframe_resp.status == 200:
+                                        iframe_text = await iframe_resp.text()
+                                        iframe_soup = BeautifulSoup(iframe_text, 'html.parser')
+                                        iframe_contents.append(iframe_soup.get_text(strip=True))
+                            except:
+                                pass
                 
                 if iframe_contents:
                     content += "\n\n" + "\n\n".join(iframe_contents)
@@ -316,10 +298,7 @@ def screenshot_and_verify_sync(x, url):
                         "role": "user",
                         "content": [
                             {"type": "text", "text": f"정보: {x}\n위 '정보'의 내용이 아래 웹페이지 스크린샷에 포함되어 있거나 관련이 있습니까? 관련성 있으면 O, 없으면 X를 출력해주세요."},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                            }
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]
                     }
                 ]
@@ -484,10 +463,13 @@ async def process_all_async(entries, result_df, progress_callback=None):
         return gpt_format_results, url_status_results, gpt_relevance_results
 
 def main():
-    # NEW: Sidebar reference UI rendered once per rerun
-    render_reference_sidebar()
+    # NEW: sidebar toggle to show big main viewer
+    sidebar_controls()
 
-    st.title("연구보고서 온라인자료 검증도구")    
+    st.title("연구보고서 온라인자료 검증도구")
+
+    # NEW: big viewer on main (top)
+    render_reference_main()
 
     if 'text_data' not in st.session_state:
         st.session_state['text_data'] = ''
