@@ -19,10 +19,34 @@ import time
 import base64
 from playwright.sync_api import sync_playwright
 
+# =========================
+# NEW: Reference popup image
+# =========================
+REF_POP_PATH = "ref_pop.png"   # <- 파일명 ref_pop.png (assets 폴더에 두는 것을 권장)
+
+# ---------- API Key handling (Cloud-safe) ----------
 load_dotenv(".env")
-if not os.environ.get("OPENAI_API_KEY"):
-    os.environ["OPENAI_API_KEY"]=getpass.getpass()
-api_key = os.environ.get("OPENAI_API_KEY")
+
+# Prefer Streamlit secrets if present
+api_key = None
+try:
+    if "OPENAI_API_KEY" in st.secrets:
+        api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    pass
+
+# Then env var
+if not api_key:
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+# As last resort, ask user via UI (works on Streamlit Cloud)
+if not api_key:
+    st.sidebar.warning("OPENAI_API_KEY가 설정되지 않았습니다. 사이드바에서 입력해주세요.")
+    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    if not api_key:
+        st.stop()
+
+os.environ["OPENAI_API_KEY"] = api_key
 
 # Asynchronous Client
 aclient = AsyncOpenAI(api_key=api_key)
@@ -45,12 +69,11 @@ st.markdown(f"""
             padding-bottom: 2rem !important;
         }}
         header {{
-            visibility: hidden; /* Hide the default Streamlit hamburger menu/header bar if desired, or just transparent */
+            visibility: hidden;
         }}
         
         /* 2. Background Decoration */
         [data-testid="stAppViewContainer"] {{
-            /* Subtle Gradient using KEI colors */
             background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%);
         }}
         [data-testid="stHeader"] {{
@@ -107,7 +130,7 @@ st.markdown(f"""
             color: #333333 !important;
         }}
         
-        /* Status Widget -- Dark Background (Matching Input Box) */
+        /* Status Widget -- Dark Background */
         [data-testid="stStatusWidget"] {{
             background-color: #4a4a4a !important;
             border: 1px solid #ddd;
@@ -119,15 +142,14 @@ st.markdown(f"""
         }}
         [data-testid="stStatusWidget"] label {{
             color: #ffffff !important;
-            font-size: 1.2rem !important; /* Slightly larger */
+            font-size: 1.2rem !important;
         }}
-        /* Status Widget Header (Chevron, etc) */
         [data-testid="stStatusWidget"] svg {{
             fill: #ffffff !important;
             color: #ffffff !important;
         }}
         
-        /* Custom Result Box (for Validation Complete message) */
+        /* Custom Result Box */
         .result-box {{
             background-color: #ffffff;
             border: 1px solid #ddd;
@@ -140,7 +162,7 @@ st.markdown(f"""
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }}
 
-        /* Download Button - White Background (Ghost Style) to match Text Area */
+        /* Download Button - Ghost Style */
         [data-testid="stBaseButton-secondary"], .stDownloadButton button {{
             background-color: #ffffff !important;
             color: {KEI_TEAL} !important;
@@ -152,7 +174,7 @@ st.markdown(f"""
             color: {KEI_BLUE} !important;
         }}
         
-        /* Top Right Toolbar (Manage App, Menu, etc.) - White Background */
+        /* Top Right Toolbar */
         [data-testid="stToolbar"] {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -162,7 +184,6 @@ st.markdown(f"""
         [data-testid="stToolbar"] button {{
             color: #333333 !important;
         }}
-        /* Fix icon fill color inside toolbar if needed */
         [data-testid="stToolbar"] svg {{
             fill: #333333 !important;
             color: #333333 !important;
@@ -174,12 +195,39 @@ st.markdown(f"""
 if os.path.exists("assets/logo.png"):
     col1, col2 = st.columns([0.2, 0.8])
     with col1:
-        st.image("assets/logo.png", width=220) 
-    # Adjusting layout so Logo and Title can feel close or aligned if needed.
-    # But user asked for logo at top left.
+        st.image("assets/logo.png", width=220)
 
 GPT_MODEL_TEXT = "gpt-5-nano"
 GPT_MODEL_VISION = "gpt-5-nano"
+
+
+# =========================
+# NEW: Sidebar reference UI (both modes)
+# =========================
+@st.dialog("📘 참고문헌 편람")
+def show_ref_popup():
+    if os.path.exists(REF_POP_PATH):
+        st.image(REF_POP_PATH, use_container_width=True)
+    else:
+        st.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
+    st.button("닫기")
+
+def render_reference_sidebar():
+    st.sidebar.markdown("## 📌 참고자료")
+    st.sidebar.caption("ref_pop.png를 참고문헌 양식 검토용으로 표시합니다.")
+
+    # (A) Sidebar button -> modal popup
+    if st.sidebar.button("🔍 편람 팝업으로 보기"):
+        show_ref_popup()
+
+    # (B) Sidebar panel -> show in sidebar
+    show_in_sidebar = st.sidebar.checkbox("🧷 사이드바에 편람 고정 표시", value=False)
+    if show_in_sidebar:
+        if os.path.exists(REF_POP_PATH):
+            st.sidebar.image(REF_POP_PATH, use_container_width=True)
+        else:
+            st.sidebar.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
+
 
 def remove_duplicate_words(text):
     words = text.split()
@@ -204,11 +252,9 @@ async def crawling_async(session, url):
             try:
                 response_text = await response.text()
             except UnicodeDecodeError:
-                # Fallback to reading bytes and decoding with 'replace'
                 content_bytes = await response.read()
                 response_text = content_bytes.decode('utf-8', errors='replace')
 
-            # Naive Redirect Check (Regex)
             match = re.search(r"location\.href\s*=\s*['\"]([^'\"]+)['\"]", response_text)
             if match:
                 redirect_url = match.group(1)
@@ -222,7 +268,6 @@ async def crawling_async(session, url):
                 soup = BeautifulSoup(response_text, 'html.parser')
                 content = soup.get_text(strip=True)
                 
-                # Iframes (Simplified: sequential fetch for stability inside async task)
                 iframes = soup.find_all('iframe')
                 iframe_contents = []
                 for iframe in iframes:
@@ -245,15 +290,10 @@ async def crawling_async(session, url):
                 return content
             else:
                 return "error_status"
-    except Exception as e:
-        # print(f"Async Crawling Error {url}: {e}")
+    except Exception:
         return "error_exception"
 
 def screenshot_and_verify_sync(x, url):
-    """
-    Sync fallback using Playwright + GPT Vision.
-    Kept sync because wrapping Playwright in async inside asyncio.run can be tricky with event loops.
-    """
     with sync_playwright() as p:
         try:
             browser = p.chromium.launch(headless=True)
@@ -262,14 +302,13 @@ def screenshot_and_verify_sync(x, url):
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000) 
                 screenshot_bytes = page.screenshot(full_page=False)
-            except Exception as e:
+            except Exception:
                 browser.close()
                 return "오류(접속실패)"
             browser.close()
             
             base64_image = base64.b64encode(screenshot_bytes).decode('utf-8')
             
-            # Sync client call
             response = start_client.chat.completions.create(
                 model=GPT_MODEL_VISION,
                 messages=[
@@ -279,9 +318,7 @@ def screenshot_and_verify_sync(x, url):
                             {"type": "text", "text": f"정보: {x}\n위 '정보'의 내용이 아래 웹페이지 스크린샷에 포함되어 있거나 관련이 있습니까? 관련성 있으면 O, 없으면 X를 출력해주세요."},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
+                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                             }
                         ]
                     }
@@ -296,10 +333,8 @@ async def GPTclass_async(session, x, y):
     if "확인필요" in x:
         return "O" 
     
-    # 1. Async Crawl
     crawled_content = await crawling_async(session, y)
     
-    # 2. Text Check
     if crawled_content not in ["error_pdf", "error_status", "error_exception"] and len(crawled_content) > 50:
         retries = 0
         while retries < 3:
@@ -313,15 +348,13 @@ async def GPTclass_async(session, x, y):
                 )
                 result = response.choices[0].message.content
                 if "O" in result:
-                    break # Go to visual fallback
+                    break
                 else:
                     return result
             except Exception:
                 await asyncio.sleep(1)
                 retries += 1
     
-    # 3. Visual Fallback (Run Sync in Thread)
-    # Since Playwright is sync and blocking, we offload to a thread to not block the async loop
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, screenshot_and_verify_sync, x, y)
     return result
@@ -384,7 +417,6 @@ def separator(entry):
     return parts
 
 def process_entries_sync(entries):
-    # This part is fast enough to be sync (Regex parsing)
     articles = []
     for entry in entries:
         note = ""
@@ -406,7 +438,7 @@ def process_entries_sync(entries):
             "title": title,
             "URL": url,
             "search_date": search_date,
-            "URL_오류여부": "X" if url.startswith("http") else "O", # Simple check first
+            "URL_오류여부": "X" if url.startswith("http") else "O",
             "형식체크_오류여부": note,
             "original_text": user_display_text
         })
@@ -429,7 +461,6 @@ async def task_with_progress(coro, progress_callback):
 
 async def process_all_async(entries, result_df, progress_callback=None):
     async with aiohttp.ClientSession() as session:
-        # Prepare Tasks
         format_coros = [GPTcheck_async(doc) for doc in entries]
         url_coros = [check_url_status_async(session, u) for u in result_df['URL']]
         
@@ -437,23 +468,12 @@ async def process_all_async(entries, result_df, progress_callback=None):
         urls = result_df['URL']
         relevance_coros = [GPTclass_async(session, q, u) for q, u in zip(queries, urls)]
         
-        # Wrap with progress
-        # If callback provided, we need to know total to update? 
-        # Actually simplest is callback just increments a counter.
-        
         format_tasks = [task_with_progress(c, progress_callback) for c in format_coros]
         url_tasks = [task_with_progress(c, progress_callback) for c in url_coros]
         relevance_tasks = [task_with_progress(c, progress_callback) for c in relevance_coros]
         
-        # Execute Concurrently
-        # We gather everything. 
-        # Note: We can't easily wait for one group then another if we want a global progress bar across all.
-        # But we need the results separated. 
-        # asyncio.gather preserves order.
-        
         all_results = await asyncio.gather(*format_tasks, *url_tasks, *relevance_tasks)
         
-        # Unpack results
         n_fmt = len(entries)
         n_url = len(result_df)
         
@@ -464,8 +484,11 @@ async def process_all_async(entries, result_df, progress_callback=None):
         return gpt_format_results, url_status_results, gpt_relevance_results
 
 def main():
-    st.title("연구보고서 온라인자료 검증도구 (v2.1 Async)")
-    
+    # NEW: Sidebar reference UI rendered once per rerun
+    render_reference_sidebar()
+
+    st.title("연구보고서 온라인자료 검증도구")    
+
     if 'text_data' not in st.session_state:
         st.session_state['text_data'] = ''
         
@@ -492,27 +515,13 @@ def main():
             if temp_entry:
                 entries.append(' '.join(temp_entry))
                 
-            # 1. Parsing (Sync)
             result_df = process_entries_sync(entries)
             
-            # 2. Async Execution
-            with st.status("고속 검증 수행 중 (AsyncIO)...", expanded=True) as status:
-                # Remove text message, use Progress Bar
+            with st.status("고속 검증 수행 중 (AsyncIO)...", expanded=True):
                 progress_bar = st.progress(0)
-                progress_text = st.empty()
-                
                 start_time = time.time()
                 
-                # Progress Logic
-                total_tasks = len(entries) * 2 + len(result_df) # Format(entries) + URL(result_df) + Content(entries/result_df matches)
-                # Note: Content check count == len(result_df) usually.
-                # Actually count based on lists prepared in process_all_async
-                # Let's approximate: 3 tasks per entry roughly.
-                
-                # To be precise, we need to know the count.
-                # Format: len(entries), URL: len(result_df), Relevance: len(result_df)
                 total_ops = len(entries) + len(result_df) * 2
-                
                 completed_ops = 0
                 
                 def update_progress():
@@ -520,49 +529,40 @@ def main():
                     completed_ops += 1
                     progress = min(1.0, completed_ops / total_ops)
                     progress_bar.progress(progress)
-                    # progress_text.text(f"처리 중: {int(progress*100)}%")
 
-                # Run the Async Loop
                 try:
                     gpt_fmt, url_stat, gpt_rel = asyncio.run(process_all_async(entries, result_df, update_progress))
                 except RuntimeError:
-                    gpt_fmt, url_stat, gpt_rel = asyncio.new_event_loop().run_until_complete(process_all_async(entries, result_df, update_progress))
+                    gpt_fmt, url_stat, gpt_rel = asyncio.new_event_loop().run_until_complete(
+                        process_all_async(entries, result_df, update_progress)
+                    )
                 
                 duration = time.time() - start_time
-                # Use custom styled box for completion message inside the status or after it
                 st.markdown(f"""
                 <div class="result-box">
                     ✅ 검증 완료! (소요시간: {duration:.2f}초)
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 3. Merging Results
             GPT_check_df = pd.DataFrame(gpt_fmt)
             
-            # Logic: X=Ok, O=Error. We map this to User Terms: 
-            # URL: X->정상, O->오류
-            # Format: X->정상, O(reason)->오류(reason)
-            # Content: X->관련, O->무관
-            
-            # 1. URL
             result_df['URL 상태'] = ["정상" if s == "X" else "오류" for s in url_stat]
             
-            # 2. Format
-            # Parsing Check (Static)
-            result_df['형식체크_오류여부'] = result_df.apply(lambda row: '오류' if '확인필요' in str(row['형식체크_오류여부']) else '정상', axis=1)            
+            result_df['형식체크_오류여부'] = result_df.apply(
+                lambda row: '오류' if '확인필요' in str(row['형식체크_오류여부']) else '정상',
+                axis=1
+            )
             
-            # GPT Check
             def map_format_status(val):
                 if val == "X": return "정상"
                 if "O" in val: return val.replace("O", "오류")
                 return val
             result_df['GPT 형식체크'] = GPT_check_df['오류여부'].apply(map_format_status)
             
-            # 3. Content
             def map_content_status(val):
                 if "X" in val: return "관련"
                 if "O" in val: return "무관"
-                return val # For potential error messages
+                return val
             result_df['GPT 내용체크'] = [map_content_status(v) for v in gpt_rel]
             
             result_df['원문'] = GPT_check_df['원문']
@@ -571,7 +571,6 @@ def main():
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                # Save with new column names
                 save_df = result_df[['source', 'title', 'URL', 'search_date', 'URL 상태', 'GPT 형식체크', 'GPT 내용체크', '원문']]
                 save_df.to_excel(writer, index=False, sheet_name='Sheet1')
             output.seek(0)
@@ -605,7 +604,6 @@ def main():
                 is_error = False
                 error_reasons = []
                 
-                # Check using new values
                 if row['URL 상태'] == '오류':
                     is_error = True
                     error_reasons.append("URL Invalid")
