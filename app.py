@@ -36,9 +36,10 @@ except Exception:
 if not api_key:
     api_key = os.environ.get("OPENAI_API_KEY")
 
+# Last resort: ask user via UI (works on Streamlit Cloud)
 if not api_key:
-    st.sidebar.warning("OPENAI_API_KEY가 설정되지 않았습니다. 사이드바에서 입력해주세요.")
-    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    st.warning("OPENAI_API_KEY가 설정되지 않았습니다. 아래에 입력해주세요.")
+    api_key = st.text_input("OpenAI API Key", type="password")
     if not api_key:
         st.stop()
 
@@ -54,7 +55,6 @@ st.set_page_config(
     layout="wide",
     page_title="연구보고서 온라인자료 검증도구",
     page_icon="assets/logo.png",
-    initial_sidebar_state="expanded",
 )
 
 # --- UI Customization (KEI Branding) ---
@@ -62,17 +62,14 @@ KEI_BLUE = "#2a9df4"
 KEI_TEAL = "#03a696"
 KEI_GRAY = "#666666"
 
-# ✅ 배경색/그라데이션 포함 (기존 유지)
-# ✅ header 숨김 제거 (해결1)
+# ✅ 배경색/그라데이션 유지
 st.markdown(f"""
     <style>
-        /* 1. Reset Top Spacing */
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
         }}
 
-        /* 2. Background Decoration */
         [data-testid="stAppViewContainer"] {{
             background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%) !important;
         }}
@@ -80,20 +77,17 @@ st.markdown(f"""
             background-color: transparent !important;
         }}
 
-        /* 3. Text & Content Styling */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, li, div, label {{
             color: #333333 !important;
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }}
 
-        /* Main Header */
         h1 {{
             color: {KEI_TEAL} !important;
             font-weight: 800;
             margin-top: 0 !important;
         }}
 
-        /* Buttons */
         .stButton>button {{
             background: linear-gradient(90deg, {KEI_TEAL} 0%, {KEI_BLUE} 100%);
             color: white !important;
@@ -108,20 +102,17 @@ st.markdown(f"""
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }}
 
-        /* Dataframe */
         [data-testid="stDataFrame"] th {{
             background-color: {KEI_TEAL} !important;
             color: white !important;
         }}
 
-        /* Input Fields */
         .stTextArea textarea {{
             background-color: #ffffff !important;
             color: #333333 !important;
             border: 1px solid #ddd;
         }}
 
-        /* File Uploader */
         [data-testid="stFileUploader"] section {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -130,7 +121,6 @@ st.markdown(f"""
             color: #333333 !important;
         }}
 
-        /* Status Widget */
         [data-testid="stStatusWidget"] {{
             background-color: #4a4a4a !important;
             border: 1px solid #ddd;
@@ -149,7 +139,6 @@ st.markdown(f"""
             color: #ffffff !important;
         }}
 
-        /* Custom Result Box */
         .result-box {{
             background-color: #ffffff;
             border: 1px solid #ddd;
@@ -162,7 +151,6 @@ st.markdown(f"""
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }}
 
-        /* Download Button (Ghost Style) */
         [data-testid="stBaseButton-secondary"], .stDownloadButton button {{
             background-color: #ffffff !important;
             color: {KEI_TEAL} !important;
@@ -174,7 +162,6 @@ st.markdown(f"""
             color: {KEI_BLUE} !important;
         }}
 
-        /* Top Right Toolbar */
         [data-testid="stToolbar"] {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -200,45 +187,30 @@ if os.path.exists("assets/logo.png"):
 GPT_MODEL_TEXT = "gpt-5-nano"
 GPT_MODEL_VISION = "gpt-5-nano"
 
+
 # =========================
-# Reference viewer controls (Sidebar + Main)
+# NEW: Main-only toggle + big reference viewer
 # =========================
-def sidebar_controls():
-    st.sidebar.markdown("## 📌 참고자료(편람)")
-    st.sidebar.caption("ref_pop.png를 참고문헌 양식 검토용으로 표시합니다.")
-
-    if "show_ref" not in st.session_state:
-        st.session_state["show_ref"] = False
-
-    # 사이드바 토글
-    st.session_state["show_ref"] = st.sidebar.checkbox(
-        "편람(이미지) 메인에 크게 보기",
-        value=st.session_state["show_ref"]
-    )
-
-def main_controls():
-    # 메인 토글(보험): 사이드바가 닫혀도 여기서 켜고 끔
+def reference_main_toggle_and_viewer():
     if "show_ref" not in st.session_state:
         st.session_state["show_ref"] = False
 
     st.session_state["show_ref"] = st.checkbox(
-        "📘 편람(이미지) 크게 보기 (메인 토글)",
+        "📘 참고문헌 편람(이미지) 크게 보기",
         value=st.session_state["show_ref"]
     )
 
-def render_reference_main():
-    if not st.session_state.get("show_ref", False):
+    if not st.session_state["show_ref"]:
         return
 
+    # 큰 뷰어
     with st.expander("📘 참고문헌 편람 (크게 보기)", expanded=True):
         if os.path.exists(REF_POP_PATH):
             st.image(REF_POP_PATH, use_container_width=True)
         else:
             st.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
 
-# =========================
-# Existing functions
-# =========================
+
 def remove_duplicate_words(text):
     words = text.split()
     seen = OrderedDict()
@@ -491,16 +463,10 @@ async def process_all_async(entries, result_df, progress_callback=None):
         return gpt_format_results, url_status_results, gpt_relevance_results
 
 def main():
-    # ✅ 해결3: 사이드바+메인 토글 둘 다 제공
-    sidebar_controls()
-
     st.title("연구보고서 온라인자료 검증도구")
 
-    # 메인 보험 토글(사이드바 안 보이는 상황 대비)
-    main_controls()
-
-    # 편람 큰 뷰어
-    render_reference_main()
+    # ✅ 메인 토글 + 큰 뷰어
+    reference_main_toggle_and_viewer()
 
     if 'text_data' not in st.session_state:
         st.session_state['text_data'] = ''
@@ -559,16 +525,13 @@ def main():
 
             GPT_check_df = pd.DataFrame(gpt_fmt)
 
-            # URL
             result_df['URL 상태'] = ["정상" if s == "X" else "오류" for s in url_stat]
 
-            # Static parsing check
             result_df['형식체크_오류여부'] = result_df.apply(
                 lambda row: '오류' if '확인필요' in str(row['형식체크_오류여부']) else '정상',
                 axis=1
             )
 
-            # GPT format check
             def map_format_status(val):
                 if val == "X":
                     return "정상"
@@ -578,7 +541,6 @@ def main():
 
             result_df['GPT 형식체크'] = GPT_check_df['오류여부'].apply(map_format_status)
 
-            # Content
             def map_content_status(val):
                 if "X" in val:
                     return "관련"
