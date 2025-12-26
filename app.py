@@ -81,6 +81,9 @@ st.markdown(f"""
             color: #333333 !important;
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }}
+          header {{
+            visibility: hidden;
+        }}
 
         h1 {{
             color: {KEI_TEAL} !important;
