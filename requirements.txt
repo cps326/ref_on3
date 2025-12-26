@@ -1,0 +1,10 @@
+streamlit
+aiohttp
+beautifulsoup4
+pandas
+requests
+openai
+XlsxWriter
+python-dotenv
+playwright
+lxml
