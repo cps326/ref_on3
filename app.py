@@ -5,7 +5,7 @@ import pandas as pd
 import re
 import requests
 from openai import AsyncOpenAI, OpenAI
-import os 
+import os
 from collections import OrderedDict
 import json
 import streamlit as st
@@ -62,31 +62,38 @@ KEI_BLUE = "#2a9df4"
 KEI_TEAL = "#03a696"
 KEI_GRAY = "#666666"
 
+# ✅ 배경색/그라데이션 포함 (기존 유지)
+# ✅ header 숨김 제거 (해결1)
 st.markdown(f"""
     <style>
+        /* 1. Reset Top Spacing */
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
         }}
-        st.session_state["show_ref"] = st.checkbox(
-        "편람(이미지) 크게 보기",
-        value=st.session_state.get("show_ref", False))
-        }}        
+
+        /* 2. Background Decoration */
         [data-testid="stAppViewContainer"] {{
-            background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%);
+            background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%) !important;
         }}
         [data-testid="stHeader"] {{
             background-color: transparent !important;
         }}
+
+        /* 3. Text & Content Styling */
         .stApp, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, li, div, label {{
             color: #333333 !important;
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         }}
+
+        /* Main Header */
         h1 {{
             color: {KEI_TEAL} !important;
             font-weight: 800;
             margin-top: 0 !important;
         }}
+
+        /* Buttons */
         .stButton>button {{
             background: linear-gradient(90deg, {KEI_TEAL} 0%, {KEI_BLUE} 100%);
             color: white !important;
@@ -100,15 +107,21 @@ st.markdown(f"""
             transform: scale(1.02);
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }}
+
+        /* Dataframe */
         [data-testid="stDataFrame"] th {{
             background-color: {KEI_TEAL} !important;
             color: white !important;
         }}
+
+        /* Input Fields */
         .stTextArea textarea {{
             background-color: #ffffff !important;
             color: #333333 !important;
             border: 1px solid #ddd;
         }}
+
+        /* File Uploader */
         [data-testid="stFileUploader"] section {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
@@ -116,10 +129,12 @@ st.markdown(f"""
         [data-testid="stFileUploader"] span {{
             color: #333333 !important;
         }}
+
+        /* Status Widget */
         [data-testid="stStatusWidget"] {{
             background-color: #4a4a4a !important;
             border: 1px solid #ddd;
-            border-radius: 8px; 
+            border-radius: 8px;
         }}
         [data-testid="stStatusWidget"] > div {{
             background-color: #4a4a4a !important;
@@ -133,6 +148,8 @@ st.markdown(f"""
             fill: #ffffff !important;
             color: #ffffff !important;
         }}
+
+        /* Custom Result Box */
         .result-box {{
             background-color: #ffffff;
             border: 1px solid #ddd;
@@ -144,6 +161,8 @@ st.markdown(f"""
             font-weight: bold;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }}
+
+        /* Download Button (Ghost Style) */
         [data-testid="stBaseButton-secondary"], .stDownloadButton button {{
             background-color: #ffffff !important;
             color: {KEI_TEAL} !important;
@@ -154,11 +173,13 @@ st.markdown(f"""
             border: 1px solid {KEI_BLUE} !important;
             color: {KEI_BLUE} !important;
         }}
+
+        /* Top Right Toolbar */
         [data-testid="stToolbar"] {{
             background-color: #ffffff !important;
             border: 1px solid #ddd;
             border-radius: 8px;
-            right: 2rem; 
+            right: 2rem;
         }}
         [data-testid="stToolbar"] button {{
             color: #333333 !important;
@@ -179,29 +200,33 @@ if os.path.exists("assets/logo.png"):
 GPT_MODEL_TEXT = "gpt-5-nano"
 GPT_MODEL_VISION = "gpt-5-nano"
 
-
 # =========================
-# NEW: Big reference viewer on MAIN
+# Reference viewer controls (Sidebar + Main)
 # =========================
 def sidebar_controls():
     st.sidebar.markdown("## 📌 참고자료(편람)")
+    st.sidebar.caption("ref_pop.png를 참고문헌 양식 검토용으로 표시합니다.")
 
-    # session_state default
     if "show_ref" not in st.session_state:
         st.session_state["show_ref"] = False
 
+    # 사이드바 토글
     st.session_state["show_ref"] = st.sidebar.checkbox(
         "편람(이미지) 메인에 크게 보기",
         value=st.session_state["show_ref"]
     )
 
-    st.sidebar.caption("※ 사이드바를 접어도, 메인에 열린 편람은 그대로 남습니다.")
+def main_controls():
+    # 메인 토글(보험): 사이드바가 닫혀도 여기서 켜고 끔
+    if "show_ref" not in st.session_state:
+        st.session_state["show_ref"] = False
 
+    st.session_state["show_ref"] = st.checkbox(
+        "📘 편람(이미지) 크게 보기 (메인 토글)",
+        value=st.session_state["show_ref"]
+    )
 
 def render_reference_main():
-    """
-    Main area big viewer. If user toggles on, show image in an expander (big).
-    """
     if not st.session_state.get("show_ref", False):
         return
 
@@ -211,7 +236,9 @@ def render_reference_main():
         else:
             st.error(f"파일을 찾을 수 없습니다: {REF_POP_PATH}")
 
-
+# =========================
+# Existing functions
+# =========================
 def remove_duplicate_words(text):
     words = text.split()
     seen = OrderedDict()
@@ -229,7 +256,7 @@ async def crawling_async(session, url):
     }
     if '.pdf' in url:
         return "error_pdf"
-    
+
     try:
         async with session.get(url, headers=headers, ssl=False, timeout=30, allow_redirects=True) as response:
             try:
@@ -250,7 +277,7 @@ async def crawling_async(session, url):
             if response.status == 200:
                 soup = BeautifulSoup(response_text, 'html.parser')
                 content = soup.get_text(strip=True)
-                
+
                 iframes = soup.find_all('iframe')
                 iframe_contents = []
                 for iframe in iframes:
@@ -267,7 +294,7 @@ async def crawling_async(session, url):
                                         iframe_contents.append(iframe_soup.get_text(strip=True))
                             except:
                                 pass
-                
+
                 if iframe_contents:
                     content += "\n\n" + "\n\n".join(iframe_contents)
                 return content
@@ -283,15 +310,15 @@ def screenshot_and_verify_sync(x, url):
             page = browser.new_page()
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000) 
+                page.wait_for_timeout(3000)
                 screenshot_bytes = page.screenshot(full_page=False)
             except Exception:
                 browser.close()
                 return "오류(접속실패)"
             browser.close()
-            
+
             base64_image = base64.b64encode(screenshot_bytes).decode('utf-8')
-            
+
             response = start_client.chat.completions.create(
                 model=GPT_MODEL_VISION,
                 messages=[
@@ -311,10 +338,10 @@ def screenshot_and_verify_sync(x, url):
 
 async def GPTclass_async(session, x, y):
     if "확인필요" in x:
-        return "O" 
-    
+        return "O"
+
     crawled_content = await crawling_async(session, y)
-    
+
     if crawled_content not in ["error_pdf", "error_status", "error_exception"] and len(crawled_content) > 50:
         retries = 0
         while retries < 3:
@@ -334,7 +361,7 @@ async def GPTclass_async(session, x, y):
             except Exception:
                 await asyncio.sleep(1)
                 retries += 1
-    
+
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, screenshot_and_verify_sync, x, y)
     return result
@@ -344,7 +371,7 @@ async def GPTcheck_async(doc):
     [[문서]]는 "출처(필요시 날짜 포함), 제목(따옴표 필수), URL, 검색일 형태로 4가지 요소로 이루어져 있고 반드시 ,로 구분하되 따옴표안 ,는 무시함
     1. [[문서]] 내용이 [[예시]]의 형태로 정리되어 있는지 체크해서 오류가 있으면 O(오류이유 간략히), 없으면 X출력(4개의 요소로 구성, 콤마, 따옴표, URL 형식 등 반드시 체크) : '오류여부' 변수에 저장
     2. 출력은 반드시 JSON 포맷으로 출력해줘, 반드시 '오류여부' 변수만 존재
-    
+
     [[예시]]
     국가법령정보센터, “물환경보전법 시행규칙”, http://www.law.go.kr/법령/물환경보전법시 행규칙, 검색일: 2018.5.3.
     """
@@ -379,7 +406,7 @@ def separator(entry):
     doc_info = parts_http[0]
     ref_info = parts_http[1] if len(parts_http) > 1 else ""
 
-    pattern_doc = r'[,.] \s*(?=(?:[^"]*"[^"]*")*[^"]*$)(?=(?:[^\(]*\([^\)]*\))*[^\)]*$)(?=(?:[^“]*“[^”]*”)*[^”]*$)' 
+    pattern_doc = r'[,.] \s*(?=(?:[^"]*"[^"]*")*[^"]*$)(?=(?:[^\(]*\([^\)]*\))*[^\)]*$)(?=(?:[^“]*“[^”]*”)*[^”]*$)'
     parts_doc = re.split(pattern_doc, doc_info)
     if len(parts_doc) == 2:
         parts[0] = parts_doc[0]
@@ -401,18 +428,18 @@ def process_entries_sync(entries):
     for entry in entries:
         note = ""
         user_display_text = entry
-        
+
         if re.search(r'(?<!")\. (?![^"]*")', entry):
             note = "확인필요: 마침표(.) 사용 등 형식 오류 가능성"
             entry = re.sub(r'(?<!")\. (?![^"]*")', ', ', entry)
-            
+
         check = separator(entry)
         check = ["확인필요" if item == 'NA' or item == '' else item for item in check]
         source = check[0]
         title = check[1]
         url = check[2]
         search_date = check[3].replace("검색일: ", "")
-        
+
         articles.append({
             "source": source,
             "title": title,
@@ -443,49 +470,52 @@ async def process_all_async(entries, result_df, progress_callback=None):
     async with aiohttp.ClientSession() as session:
         format_coros = [GPTcheck_async(doc) for doc in entries]
         url_coros = [check_url_status_async(session, u) for u in result_df['URL']]
-        
+
         queries = result_df['title'] + " + " + result_df['source']
         urls = result_df['URL']
         relevance_coros = [GPTclass_async(session, q, u) for q, u in zip(queries, urls)]
-        
+
         format_tasks = [task_with_progress(c, progress_callback) for c in format_coros]
         url_tasks = [task_with_progress(c, progress_callback) for c in url_coros]
         relevance_tasks = [task_with_progress(c, progress_callback) for c in relevance_coros]
-        
+
         all_results = await asyncio.gather(*format_tasks, *url_tasks, *relevance_tasks)
-        
+
         n_fmt = len(entries)
         n_url = len(result_df)
-        
+
         gpt_format_results = all_results[:n_fmt]
         url_status_results = all_results[n_fmt:n_fmt+n_url]
         gpt_relevance_results = all_results[n_fmt+n_url:]
-        
+
         return gpt_format_results, url_status_results, gpt_relevance_results
 
 def main():
-    # NEW: sidebar toggle to show big main viewer
+    # ✅ 해결3: 사이드바+메인 토글 둘 다 제공
     sidebar_controls()
 
     st.title("연구보고서 온라인자료 검증도구")
 
-    # NEW: big viewer on main (top)
+    # 메인 보험 토글(사이드바 안 보이는 상황 대비)
+    main_controls()
+
+    # 편람 큰 뷰어
     render_reference_main()
 
     if 'text_data' not in st.session_state:
         st.session_state['text_data'] = ''
-        
+
     uploaded_file = st.file_uploader("온라인자료 파일(txt)를 업로드 하거나", type=["txt"])
     text_data_input = st.text_area('온라인자료 텍스트를 입력하세요', st.session_state['text_data'], height=150)
-    
+
     if st.button('검증 실행'):
         if uploaded_file or text_data_input.strip():
             if uploaded_file:
                 data = uploaded_file.read().decode("utf-8")
             else:
                 data = text_data_input
-            st.session_state['text_data'] = data 
-            
+            st.session_state['text_data'] = data
+
             raw_entries = data.strip().split('\n')
             entries = []
             temp_entry = []
@@ -497,16 +527,16 @@ def main():
                     temp_entry.append(line)
             if temp_entry:
                 entries.append(' '.join(temp_entry))
-                
+
             result_df = process_entries_sync(entries)
-            
+
             with st.status("고속 검증 수행 중 (AsyncIO)...", expanded=True):
                 progress_bar = st.progress(0)
                 start_time = time.time()
-                
+
                 total_ops = len(entries) + len(result_df) * 2
                 completed_ops = 0
-                
+
                 def update_progress():
                     nonlocal completed_ops
                     completed_ops += 1
@@ -519,46 +549,54 @@ def main():
                     gpt_fmt, url_stat, gpt_rel = asyncio.new_event_loop().run_until_complete(
                         process_all_async(entries, result_df, update_progress)
                     )
-                
+
                 duration = time.time() - start_time
                 st.markdown(f"""
                 <div class="result-box">
                     ✅ 검증 완료! (소요시간: {duration:.2f}초)
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             GPT_check_df = pd.DataFrame(gpt_fmt)
-            
+
+            # URL
             result_df['URL 상태'] = ["정상" if s == "X" else "오류" for s in url_stat]
-            
+
+            # Static parsing check
             result_df['형식체크_오류여부'] = result_df.apply(
                 lambda row: '오류' if '확인필요' in str(row['형식체크_오류여부']) else '정상',
                 axis=1
             )
-            
+
+            # GPT format check
             def map_format_status(val):
-                if val == "X": return "정상"
-                if "O" in val: return val.replace("O", "오류")
+                if val == "X":
+                    return "정상"
+                if "O" in val:
+                    return val.replace("O", "오류")
                 return val
+
             result_df['GPT 형식체크'] = GPT_check_df['오류여부'].apply(map_format_status)
-            
+
+            # Content
             def map_content_status(val):
-                if "X" in val: return "관련"
-                if "O" in val: return "무관"
+                if "X" in val:
+                    return "관련"
+                if "O" in val:
+                    return "무관"
                 return val
+
             result_df['GPT 내용체크'] = [map_content_status(v) for v in gpt_rel]
-            
             result_df['원문'] = GPT_check_df['원문']
-            
+
             st.session_state['result_df'] = result_df
-            
+
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 save_df = result_df[['source', 'title', 'URL', 'search_date', 'URL 상태', 'GPT 형식체크', 'GPT 내용체크', '원문']]
                 save_df.to_excel(writer, index=False, sheet_name='Sheet1')
             output.seek(0)
             st.session_state.processed_data = output.read()
-            
         else:
             st.warning("데이터를 입력해주세요.")
 
@@ -566,7 +604,7 @@ def main():
         st.divider()
         col1, col2 = st.columns([1, 1])
         df = st.session_state['result_df']
-        
+
         with col1:
             st.subheader("검증 결과 요약")
             display_columns = ['title', 'URL', 'URL 상태', 'GPT 형식체크', 'GPT 내용체크']
@@ -582,19 +620,19 @@ def main():
         with col2:
             st.subheader("원본 텍스트 검토")
             html_content = "<div style='background-color:#f9f9f9; padding:10px; border-radius:5px; height: 600px; overflow-y: scroll;'>"
-            for index, row in df.iterrows():
+            for _, row in df.iterrows():
                 text = row['원문']
                 is_error = False
                 error_reasons = []
-                
+
                 if row['URL 상태'] == '오류':
                     is_error = True
                     error_reasons.append("URL Invalid")
-                
+
                 if '오류' in str(row['GPT 형식체크']):
                     is_error = True
                     error_reasons.append(f"Format: {str(row['GPT 형식체크'])}")
-                    
+
                 if '무관' in str(row['GPT 내용체크']):
                     is_error = True
                     msg = str(row['GPT 내용체크'])
