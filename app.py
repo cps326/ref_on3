@@ -68,9 +68,10 @@ st.markdown(f"""
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
         }}
-        header {{
-            visibility: hidden;
-        }}
+        st.session_state["show_ref"] = st.checkbox(
+        "편람(이미지) 크게 보기",
+        value=st.session_state.get("show_ref", False))
+        }}        
         [data-testid="stAppViewContainer"] {{
             background: linear-gradient(135deg, #f4f9fd 0%, #e0f2f1 100%);
         }}
