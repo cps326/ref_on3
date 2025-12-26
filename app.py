@@ -199,7 +199,7 @@ def reference_main_toggle_and_viewer():
         st.session_state["show_ref"] = False
 
     st.session_state["show_ref"] = st.checkbox(
-        "📘 참고문헌 편람(이미지) 크게 보기",
+        "📘 KEI 출판업무 편람 - 참고문헌(온라인 자료) 보기",
         value=st.session_state["show_ref"]
     )
 
@@ -207,7 +207,7 @@ def reference_main_toggle_and_viewer():
         return
 
     # 큰 뷰어
-    with st.expander("📘 참고문헌 편람 (크게 보기)", expanded=True):
+    with st.expander("📘 참고문헌(온라인 자료) ", expanded=True):
         if os.path.exists(REF_POP_PATH):
             st.image(REF_POP_PATH, use_container_width=True)
         else:
