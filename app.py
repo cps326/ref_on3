@@ -670,37 +670,31 @@ def main():
         with col1:
             st.subheader("검증 결과 요약")
 
-            # ✅ 요약표 열 순서(확정): URL 상태(1열), GPT 형식체크(2열)
+            # ✅ (요청 반영) URL 상태 1열, GPT 형식체크 2열
             display_columns = ['URL 상태', 'GPT 형식체크', 'title', 'URL', 'GPT 내용체크']
+            summary_df = df[display_columns].copy()
 
-            # ✅ 컬럼 누락 시 원인 바로 보이도록
-            missing = [c for c in display_columns if c not in df.columns]
-            if missing:
-                st.error(f"요약표에 필요한 컬럼이 없습니다: {missing}")
-                st.write("현재 df 컬럼:", list(df.columns))
-            else:
-                summary_df = df[display_columns].copy()
+            # ✅ URL 상태가 "오류"이면 빨간 셀
+            def highlight_url_status(val):
+                if str(val).strip() == "오류":
+                    return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
+                return ""
 
-                # ✅ URL 상태가 "오류"이면 빨간 셀
-                def highlight_url_status(val):
-                    if str(val).strip() == "오류":
-                        return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
-                    return ""
+            # ✅ GPT 형식체크에 "오류"가 포함되면 빨간 셀
+            def highlight_gpt_format(val):
+                if "오류" in str(val):
+                    return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
+                return ""
 
-                # ✅ GPT 형식체크에 "오류" 포함이면 빨간 셀
-                def highlight_gpt_format(val):
-                    if "오류" in str(val):
-                        return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
-                    return ""
+            styled = (
+                summary_df.style
+                .applymap(highlight_url_status, subset=["URL 상태"])
+                .applymap(highlight_gpt_format, subset=["GPT 형식체크"])
+            )
 
-                styled = (
-                    summary_df.style
-                    .applymap(highlight_url_status, subset=["URL 상태"])
-                    .applymap(highlight_gpt_format, subset=["GPT 형식체크"])
-                )
-
-                # ✅ Streamlit에서 Styler 렌더링 이슈 대비: 순서 확인(표) + 스타일(가능하면)
-                st.dataframe(summary_df, use_container_width=True)
+            try:
+                st.dataframe(styled, use_container_width=True)
+            except Exception:
                 st.write(styled)
 
             if 'processed_data' in st.session_state and st.session_state.processed_data:
