@@ -12,10 +12,10 @@ import streamlit as st
 import io
 import xlsxwriter
 from dotenv import load_dotenv
-from urllib.parse import urljoin
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit, quote
 import time
 import base64
+import ssl
 from playwright.sync_api import sync_playwright
 
 # =========================
@@ -192,6 +192,52 @@ GPT_MODEL_VISION = "gpt-5-nano"
 
 
 # =========================
+# URL helpers (NEW)
+# =========================
+def normalize_url_for_request(raw_url: str) -> str:
+    """
+    - URL에 한글/공백 등이 포함될 수 있으므로 request용으로 path/query 등을 percent-encoding 해줌
+    - 원문(raw_url)은 그대로 두고, 네트워크 요청에만 사용
+    """
+    if not raw_url:
+        return raw_url
+    raw_url = raw_url.strip()
+
+    if not raw_url.startswith(("http://", "https://")):
+        return raw_url
+
+    try:
+        parts = urlsplit(raw_url)
+        # path는 / 유지 + 기존 % 유지
+        path = quote(parts.path, safe="/%:@-._~!$&'()*+,;=")
+        # query는 &= 유지 + 기존 % 유지
+        query = quote(parts.query, safe="=&%:@-._~!$&'()*+,;/?")
+        fragment = quote(parts.fragment, safe="%:@-._~!$&'()*+,;/?")
+        return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
+    except Exception:
+        return raw_url
+
+
+def replace_first_url_with_encoded(text: str) -> str:
+    """
+    GPT 형식 검증 입력용:
+    문장 내 첫 번째 URL을 찾아 normalize_url_for_request 결과로 치환.
+    (원문은 따로 저장해서 UI에는 원문 그대로 표시)
+    """
+    if not text:
+        return text
+
+    pattern = r'(https?://[^\s,]+)'
+    m = re.search(pattern, text)
+    if not m:
+        return text
+
+    original_url = m.group(1)
+    encoded_url = normalize_url_for_request(original_url)
+    return text.replace(original_url, encoded_url, 1)
+
+
+# =========================
 # NEW: Main-only toggle + big reference viewer
 # =========================
 def reference_main_toggle_and_viewer():
@@ -232,8 +278,12 @@ async def crawling_async(session, url):
     if '.pdf' in url:
         return "error_pdf"
 
+    # 요청용 URL 정규화(한글 포함 대비)
+    req_url = normalize_url_for_request(url)
+
     try:
-        async with session.get(url, headers=headers, ssl=False, timeout=30, allow_redirects=True) as response:
+        # 크롤링은 SSL 경고 때문에 막히지 않도록 기존처럼 ssl=False 유지
+        async with session.get(req_url, headers=headers, ssl=False, timeout=30, allow_redirects=True) as response:
             try:
                 response_text = await response.text()
             except UnicodeDecodeError:
@@ -245,7 +295,8 @@ async def crawling_async(session, url):
                 redirect_url = match.group(1)
                 if "javascript:" not in redirect_url.lower():
                     if not redirect_url.startswith("http"):
-                        redirect_url = urljoin(url, redirect_url)
+                        redirect_url = urljoin(req_url, redirect_url)
+                    redirect_url = normalize_url_for_request(redirect_url)
                     async with session.get(redirect_url, headers=headers, ssl=False, timeout=30) as response2:
                         response_text += await response2.text()
 
@@ -258,7 +309,8 @@ async def crawling_async(session, url):
                 for iframe in iframes:
                     iframe_src = iframe.get('src')
                     if iframe_src and iframe_src.strip():
-                        iframe_url = urljoin(url, iframe_src)
+                        iframe_url = urljoin(req_url, iframe_src)
+                        iframe_url = normalize_url_for_request(iframe_url)
                         parsed = urlparse(iframe_url)
                         if parsed.scheme in ('http', 'https'):
                             try:
@@ -284,7 +336,8 @@ def screenshot_and_verify_sync(x, url):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             try:
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                # Playwright도 한글 URL이 있을 수 있어 normalize 적용(안전)
+                page.goto(normalize_url_for_request(url), timeout=30000, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000)
                 screenshot_bytes = page.screenshot(full_page=False)
             except Exception:
@@ -344,6 +397,11 @@ async def GPTclass_async(session, x, y):
 async def GPTcheck_async(doc):
     query = """
     [[문서]]는 "출처(필요시 날짜 포함), 제목(따옴표 필수), URL, 검색일 형태로 4가지 요소로 이루어져 있고 반드시 ,로 구분하되 따옴표안 ,는 무시함
+
+    ✅ 중요:
+    - URL에는 한글이 포함될 수 있으며(예: .../자료/환경.pdf), 퍼센트 인코딩(%xx)이 되어 있지 않더라도 '형식 오류'로 판단하지 말 것.
+    - 단, URL은 http:// 또는 https:// 로 시작해야 함.
+
     1. [[문서]] 내용이 [[예시]]의 형태로 정리되어 있는지 체크해서 오류가 있으면 O(오류이유 간략히), 없으면 X출력(4개의 요소로 구성, 콤마, 따옴표, URL 형식 등 반드시 체크) : '오류여부' 변수에 저장
     2. 출력은 반드시 JSON 포맷으로 출력해줘, 반드시 '오류여부' 변수만 존재
 
@@ -351,6 +409,10 @@ async def GPTcheck_async(doc):
     국가법령정보센터, “물환경보전법 시행규칙”, http://www.law.go.kr/법령/물환경보전법시 행규칙, 검색일: 2018.5.3.
     """
     retries = 0
+
+    # GPT 입력용으로는 URL을 percent-encoding 형태로 한 번 보정(원문은 별도 저장)
+    doc_for_check = replace_first_url_with_encoded(doc)
+
     while retries < 3:
         try:
             response = await aclient.chat.completions.create(
@@ -358,7 +420,7 @@ async def GPTcheck_async(doc):
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": f"{query}\n\n주의: 입력된 텍스트가 '문서:'로 시작하면 그 부분은 라벨이므로 무시하고 실제 내용만 분석할 것."},
-                    {"role": "user", "content": f"{doc}"}
+                    {"role": "user", "content": f"{doc_for_check}"}
                 ]
             )
             result = response.choices[0].message.content
@@ -426,13 +488,32 @@ def process_entries_sync(entries):
         })
     return pd.DataFrame(articles)
 
+# =========================
+# URL status check (UPDATED)
+# - SSL 인증서 오류는 "SSL"로 반환(=정상(SSL 유의)로 표시)
+# - SSL 오류 시 ssl=False로 재시도하여 실제 접속 가능하면 SSL로 확정
+# =========================
 async def check_url_status_async(session, url):
     if not url.startswith("http"):
-        return "O"
+        return "O"  # 스킴 자체 오류
+
+    req_url = normalize_url_for_request(url)
+
+    ssl_ctx = ssl.create_default_context()
+
     try:
-        async with session.get(url, ssl=False, timeout=10) as resp:
+        async with session.get(req_url, ssl=ssl_ctx, timeout=10, allow_redirects=True) as resp:
             return "X" if resp.status == 200 else "O"
-    except:
+
+    except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLCertVerificationError):
+        # 인증서 검증 실패(SSL 유의) -> 검증을 끄고 실제 접속 가능 여부 확인
+        try:
+            async with session.get(req_url, ssl=False, timeout=10, allow_redirects=True) as resp2:
+                return "SSL" if resp2.status == 200 else "O"
+        except Exception:
+            return "O"
+
+    except Exception:
         return "O"
 
 async def task_with_progress(coro, progress_callback):
@@ -528,7 +609,18 @@ def main():
 
             GPT_check_df = pd.DataFrame(gpt_fmt)
 
-            result_df['URL 상태'] = ["정상" if s == "X" else "오류" for s in url_stat]
+            # ✅ URL 상태 표기 로직 변경:
+            # X -> 정상
+            # SSL -> 정상(SSL 유의)
+            # O -> 오류
+            def map_url_status(code):
+                if code == "X":
+                    return "정상"
+                if code == "SSL":
+                    return "정상(SSL 유의)"
+                return "오류"
+
+            result_df['URL 상태'] = [map_url_status(s) for s in url_stat]
 
             result_df['형식체크_오류여부'] = result_df.apply(
                 lambda row: '오류' if '확인필요' in str(row['형식체크_오류여부']) else '정상',
@@ -590,6 +682,7 @@ def main():
                 is_error = False
                 error_reasons = []
 
+                # ✅ SSL 유의는 오류로 처리하지 않음
                 if row['URL 상태'] == '오류':
                     is_error = True
                     error_reasons.append("URL Invalid")
