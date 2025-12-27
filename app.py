@@ -280,7 +280,6 @@ async def crawling_async(session, url):
     req_url = normalize_url_for_request(url)
 
     try:
-        # 크롤링은 SSL 경고 때문에 막히지 않도록 ssl=False 유지
         async with session.get(req_url, headers=headers, ssl=False, timeout=30, allow_redirects=True) as response:
             try:
                 response_text = await response.text()
@@ -331,10 +330,9 @@ async def crawling_async(session, url):
 
 def screenshot_and_verify_sync(x, url):
     """
-    ✅ 규칙 통일(중요):
+    ✅ 규칙 통일:
     - 관련이면 X
     - 무관이면 O
-    (GPTclass_async의 system 프롬프트 및 map_content_status와 동일)
     """
     with sync_playwright() as p:
         try:
@@ -413,17 +411,16 @@ async def GPTcheck_async(doc):
     [[문서]]는 "출처(필요시 날짜 포함), 제목(따옴표 필수), URL, 검색일 형태로 4가지 요소로 이루어져 있고 반드시 ,로 구분하되 따옴표안 ,는 무시함
 
     ✅ 중요:
-    - URL에는 한글이 포함될 수 있으며(예: .../자료/환경.pdf), 퍼센트 인코딩(%xx)이 되어 있지 않더라도 '형식 오류'로 판단하지 말 것.
+    - URL에는 한글이 포함될 수 있으며 퍼센트 인코딩(%xx)이 되어 있지 않더라도 '형식 오류'로 판단하지 말 것.
     - 단, URL은 http:// 또는 https:// 로 시작해야 함.
 
-    1. [[문서]] 내용이 [[예시]]의 형태로 정리되어 있는지 체크해서 오류가 있으면 O(오류이유 간략히), 없으면 X출력(4개의 요소로 구성, 콤마, 따옴표, URL 형식 등 반드시 체크) : '오류여부' 변수에 저장
+    1. [[문서]] 내용이 [[예시]]의 형태로 정리되어 있는지 체크해서 오류가 있으면 O(오류이유 간략히), 없으면 X출력 : '오류여부'
     2. 출력은 반드시 JSON 포맷으로 출력해줘, 반드시 '오류여부' 변수만 존재
 
     [[예시]]
     국가법령정보센터, “물환경보전법 시행규칙”, http://www.law.go.kr/법령/물환경보전법시 행규칙, 검색일: 2018.5.3.
     """
     retries = 0
-
     doc_for_check = replace_first_url_with_encoded(doc)
 
     while retries < 3:
@@ -673,7 +670,7 @@ def main():
         with col1:
             st.subheader("검증 결과 요약")
 
-            # ✅ 열 순서 변경: URL 상태(1열) -> GPT 형식체크(2열)
+            # ✅ (요청 반영) URL 상태 1열, GPT 형식체크 2열
             display_columns = ['URL 상태', 'GPT 형식체크', 'title', 'URL', 'GPT 내용체크']
             summary_df = df[display_columns].copy()
 
