@@ -672,15 +672,28 @@ def main():
 
         with col1:
             st.subheader("검증 결과 요약")
-            display_columns = ['URL 상태', 'title', 'URL', 'GPT 형식체크', 'GPT 내용체크']
+
+            # ✅ 열 순서 변경: URL 상태(1열) -> GPT 형식체크(2열)
+            display_columns = ['URL 상태', 'GPT 형식체크', 'title', 'URL', 'GPT 내용체크']
             summary_df = df[display_columns].copy()
 
+            # ✅ URL 상태가 "오류"이면 빨간 셀
             def highlight_url_status(val):
-                if val == "오류":
+                if str(val).strip() == "오류":
                     return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
                 return ""
 
-            styled = summary_df.style.applymap(highlight_url_status, subset=["URL 상태"])
+            # ✅ GPT 형식체크에 "오류"가 포함되면 빨간 셀
+            def highlight_gpt_format(val):
+                if "오류" in str(val):
+                    return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
+                return ""
+
+            styled = (
+                summary_df.style
+                .applymap(highlight_url_status, subset=["URL 상태"])
+                .applymap(highlight_gpt_format, subset=["GPT 형식체크"])
+            )
 
             try:
                 st.dataframe(styled, use_container_width=True)
