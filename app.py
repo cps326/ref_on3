@@ -196,8 +196,8 @@ GPT_MODEL_VISION = "gpt-5-nano"
 # =========================
 def normalize_url_for_request(raw_url: str) -> str:
     """
-    - URL에 한글/공백 등이 포함될 수 있으므로 request용으로 path/query 등을 percent-encoding 해줌
-    - 원문(raw_url)은 그대로 두고, 네트워크 요청에만 사용
+    URL에 한글/공백 등이 포함될 수 있으므로 request용으로 path/query 등을 percent-encoding 해줌
+    원문(raw_url)은 그대로 두고, 네트워크 요청에만 사용
     """
     if not raw_url:
         return raw_url
@@ -208,9 +208,7 @@ def normalize_url_for_request(raw_url: str) -> str:
 
     try:
         parts = urlsplit(raw_url)
-        # path는 / 유지 + 기존 % 유지
         path = quote(parts.path, safe="/%:@-._~!$&'()*+,;=")
-        # query는 &= 유지 + 기존 % 유지
         query = quote(parts.query, safe="=&%:@-._~!$&'()*+,;/?")
         fragment = quote(parts.fragment, safe="%:@-._~!$&'()*+,;/?")
         return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
@@ -222,7 +220,7 @@ def replace_first_url_with_encoded(text: str) -> str:
     """
     GPT 형식 검증 입력용:
     문장 내 첫 번째 URL을 찾아 normalize_url_for_request 결과로 치환.
-    (원문은 따로 저장해서 UI에는 원문 그대로 표시)
+    (원문은 별도 저장해서 UI에는 원문 그대로 표시)
     """
     if not text:
         return text
@@ -252,7 +250,6 @@ def reference_main_toggle_and_viewer():
     if not st.session_state["show_ref"]:
         return
 
-    # 큰 뷰어
     with st.expander("📘 참고문헌(온라인 자료) ", expanded=True):
         if os.path.exists(REF_POP_PATH):
             st.image(REF_POP_PATH, use_container_width=True)
@@ -278,11 +275,10 @@ async def crawling_async(session, url):
     if '.pdf' in url:
         return "error_pdf"
 
-    # 요청용 URL 정규화(한글 포함 대비)
     req_url = normalize_url_for_request(url)
 
     try:
-        # 크롤링은 SSL 경고 때문에 막히지 않도록 기존처럼 ssl=False 유지
+        # 크롤링은 SSL 경고 때문에 막히지 않도록 ssl=False 유지
         async with session.get(req_url, headers=headers, ssl=False, timeout=30, allow_redirects=True) as response:
             try:
                 response_text = await response.text()
@@ -336,7 +332,6 @@ def screenshot_and_verify_sync(x, url):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             try:
-                # Playwright도 한글 URL이 있을 수 있어 normalize 적용(안전)
                 page.goto(normalize_url_for_request(url), timeout=30000, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000)
                 screenshot_bytes = page.screenshot(full_page=False)
@@ -410,7 +405,7 @@ async def GPTcheck_async(doc):
     """
     retries = 0
 
-    # GPT 입력용으로는 URL을 percent-encoding 형태로 한 번 보정(원문은 별도 저장)
+    # GPT 입력용으로는 URL을 percent-encoding 형태로 보정(원문은 그대로 저장)
     doc_for_check = replace_first_url_with_encoded(doc)
 
     while retries < 3:
@@ -498,7 +493,6 @@ async def check_url_status_async(session, url):
         return "O"  # 스킴 자체 오류
 
     req_url = normalize_url_for_request(url)
-
     ssl_ctx = ssl.create_default_context()
 
     try:
@@ -549,7 +543,6 @@ async def process_all_async(entries, result_df, progress_callback=None):
 def main():
     st.title("연구보고서 온라인자료 검증도구")
 
-    # ✅ 메인 토글 + 큰 뷰어
     reference_main_toggle_and_viewer()
 
     if 'text_data' not in st.session_state:
@@ -609,10 +602,6 @@ def main():
 
             GPT_check_df = pd.DataFrame(gpt_fmt)
 
-            # ✅ URL 상태 표기 로직 변경:
-            # X -> 정상
-            # SSL -> 정상(SSL 유의)
-            # O -> 오류
             def map_url_status(code):
                 if code == "X":
                     return "정상"
@@ -664,7 +653,8 @@ def main():
 
         with col1:
             st.subheader("검증 결과 요약")
-            display_columns = ['title', 'URL', 'URL 상태', 'GPT 형식체크', 'GPT 내용체크']
+            # ✅ URL 상태를 1열로
+            display_columns = ['URL 상태', 'title', 'URL', 'GPT 형식체크', 'GPT 내용체크']
             st.dataframe(df[display_columns])
             if 'processed_data' in st.session_state and st.session_state.processed_data:
                 st.download_button(
@@ -677,30 +667,62 @@ def main():
         with col2:
             st.subheader("원본 텍스트 검토")
             html_content = "<div style='background-color:#f9f9f9; padding:10px; border-radius:5px; height: 600px; overflow-y: scroll;'>"
+
             for _, row in df.iterrows():
                 text = row['원문']
+
                 is_error = False
                 error_reasons = []
 
-                # ✅ SSL 유의는 오류로 처리하지 않음
+                is_info = False
+                info_reasons = []
+
+                # URL 오류는 에러
                 if row['URL 상태'] == '오류':
                     is_error = True
                     error_reasons.append("URL Invalid")
+                # SSL 유의는 정보(하이라이트 없음)
+                elif row['URL 상태'] == '정상(SSL 유의)':
+                    is_info = True
+                    info_reasons.append("SSL 유의")
 
+                # 형식 오류는 에러
                 if '오류' in str(row['GPT 형식체크']):
                     is_error = True
                     error_reasons.append(f"Format: {str(row['GPT 형식체크'])}")
 
+                # 내용 무관은 에러
                 if '무관' in str(row['GPT 내용체크']):
                     is_error = True
                     msg = str(row['GPT 내용체크'])
                     error_reasons.append("Content Irrelevant" if msg == "무관" else msg)
 
+                # 정보성 표시(SSL 유의) 문자열
+                info_tooltip = " | ".join(info_reasons)
+                info_span = (
+                    f"<span style='font-size:0.8em; color:#0b5ed7; margin-left:6px;' "
+                    f"title='{info_tooltip}'>ℹ️ {info_tooltip}</span>"
+                ) if is_info else ""
+
                 if is_error:
                     tooltip = " | ".join(error_reasons)
-                    html_content += f"<p style='margin-bottom: 8px;'><span style='background-color: #ffdce0; color: #d8000c; padding: 2px 4px; border-radius: 3px;' title='{tooltip}'>{text}</span> <span style='font-size:0.8em; color:red;'>&#9888; {tooltip}</span></p>"
+                    html_content += (
+                        f"<p style='margin-bottom: 8px;'>"
+                        f"<span style='background-color: #ffdce0; color: #d8000c; padding: 2px 4px; border-radius: 3px;' "
+                        f"title='{tooltip}'>{text}</span> "
+                        f"<span style='font-size:0.8em; color:#d8000c;'>&#9888; {tooltip}</span>"
+                        f"{info_span}"
+                        f"</p>"
+                    )
                 else:
-                    html_content += f"<p style='margin-bottom: 8px; color: #333;'>{text}</p>"
+                    # ✅ SSL 유의만 있는 경우: 하이라이트 없이 정보 아이콘만
+                    html_content += (
+                        f"<p style='margin-bottom: 8px; color: #333;'>"
+                        f"{text}"
+                        f"{info_span}"
+                        f"</p>"
+                    )
+
             html_content += "</div>"
             st.markdown(html_content, unsafe_allow_html=True)
 
