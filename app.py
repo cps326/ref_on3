@@ -330,6 +330,12 @@ async def crawling_async(session, url):
 
 
 def screenshot_and_verify_sync(x, url):
+    """
+    ✅ 규칙 통일(중요):
+    - 관련이면 X
+    - 무관이면 O
+    (GPTclass_async의 system 프롬프트 및 map_content_status와 동일)
+    """
     with sync_playwright() as p:
         try:
             browser = p.chromium.launch(headless=True)
@@ -351,7 +357,14 @@ def screenshot_and_verify_sync(x, url):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": f"정보: {x}\n위 '정보'의 내용이 아래 웹페이지 스크린샷에 포함되어 있거나 관련이 있습니까? 관련성 있으면 O, 없으면 X를 출력해주세요."},
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"정보: {x}\n"
+                                    "위 '정보'의 내용이 아래 웹페이지 스크린샷에 포함되어 있거나 관련이 있습니까?\n"
+                                    "관련성 있으면 X, 없으면 O를 출력해주세요."
+                                )
+                            },
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]
                     }
@@ -376,7 +389,8 @@ async def GPTclass_async(session, x, y):
                 response = await aclient.chat.completions.create(
                     model=GPT_MODEL_TEXT,
                     messages=[
-                        {"role": "system", "content": "[[웹자료]]에서 내용이 주어진 [[정보]] 관련내용이 대략적으로 포함되어있으면 X, 관련내용이 아니거나, 빈페이지 또는 없는 페이지면 O 출력"},
+                        {"role": "system",
+                         "content": "[[웹자료]]에서 내용이 주어진 [[정보]] 관련내용이 대략적으로 포함되어있으면 X, 관련내용이 아니거나, 빈페이지 또는 없는 페이지면 O 출력"},
                         {"role": "user", "content": f"[[정보]]: {x}, [[웹자료]] : {truncate_string(crawled_content)}"}
                     ]
                 )
@@ -410,7 +424,6 @@ async def GPTcheck_async(doc):
     """
     retries = 0
 
-    # GPT 입력용으로는 URL을 percent-encoding 형태로 보정(원문은 그대로 저장)
     doc_for_check = replace_first_url_with_encoded(doc)
 
     while retries < 3:
@@ -419,7 +432,8 @@ async def GPTcheck_async(doc):
                 model=GPT_MODEL_TEXT,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": f"{query}\n\n주의: 입력된 텍스트가 '문서:'로 시작하면 그 부분은 라벨이므로 무시하고 실제 내용만 분석할 것."},
+                    {"role": "system",
+                     "content": f"{query}\n\n주의: 입력된 텍스트가 '문서:'로 시작하면 그 부분은 라벨이므로 무시하고 실제 내용만 분석할 것."},
                     {"role": "user", "content": f"{doc_for_check}"}
                 ]
             )
@@ -491,11 +505,6 @@ def process_entries_sync(entries):
     return pd.DataFrame(articles)
 
 
-# =========================
-# URL status check
-# - SSL 인증서 오류는 "SSL"로 반환(=정상(SSL 유의)로 표시)
-# - SSL 오류 시 ssl=False로 재시도하여 실제 접속 가능하면 SSL로 확정
-# =========================
 async def check_url_status_async(session, url):
     if not url.startswith("http"):
         return "O"  # 스킴 자체 오류
@@ -666,7 +675,6 @@ def main():
             display_columns = ['URL 상태', 'title', 'URL', 'GPT 형식체크', 'GPT 내용체크']
             summary_df = df[display_columns].copy()
 
-            # ✅ URL 상태 셀 색상(오류=빨강)
             def highlight_url_status(val):
                 if val == "오류":
                     return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
@@ -674,7 +682,6 @@ def main():
 
             styled = summary_df.style.applymap(highlight_url_status, subset=["URL 상태"])
 
-            # Streamlit 버전에 따라 styler 지원이 다를 수 있어 fallback 처리
             try:
                 st.dataframe(styled, use_container_width=True)
             except Exception:
@@ -701,27 +708,22 @@ def main():
                 is_info = False
                 info_reasons = []
 
-                # URL 오류는 에러
                 if row['URL 상태'] == '오류':
                     is_error = True
                     error_reasons.append("URL Invalid")
-                # SSL 유의는 정보(하이라이트 없음)
                 elif row['URL 상태'] == '정상(SSL 유의)':
                     is_info = True
                     info_reasons.append("SSL 유의")
 
-                # 형식 오류는 에러
                 if '오류' in str(row['GPT 형식체크']):
                     is_error = True
                     error_reasons.append(f"Format: {str(row['GPT 형식체크'])}")
 
-                # 내용 무관은 에러
                 if '무관' in str(row['GPT 내용체크']):
                     is_error = True
                     msg = str(row['GPT 내용체크'])
                     error_reasons.append("Content Irrelevant" if msg == "무관" else msg)
 
-                # ✅ 정보성 표시(색상 지정 없음)
                 info_tooltip = " | ".join(info_reasons)
                 info_span = (
                     f"<span style='font-size:0.8em; margin-left:6px;' "
@@ -739,7 +741,6 @@ def main():
                         f"</p>"
                     )
                 else:
-                    # SSL 유의만 있는 경우: 하이라이트 없이 ℹ️만
                     html_content += (
                         f"<p style='margin-bottom: 8px; color: #333;'>"
                         f"{text}"
