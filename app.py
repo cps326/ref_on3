@@ -192,7 +192,7 @@ GPT_MODEL_VISION = "gpt-5-nano"
 
 
 # =========================
-# URL helpers (NEW)
+# URL helpers
 # =========================
 def normalize_url_for_request(raw_url: str) -> str:
     """
@@ -236,7 +236,7 @@ def replace_first_url_with_encoded(text: str) -> str:
 
 
 # =========================
-# NEW: Main-only toggle + big reference viewer
+# Reference viewer
 # =========================
 def reference_main_toggle_and_viewer():
     if "show_ref" not in st.session_state:
@@ -265,8 +265,10 @@ def remove_duplicate_words(text):
             seen[word] = None
     return ' '.join(seen.keys())
 
+
 def truncate_string(text, max_length=10000):
     return text[:max_length]
+
 
 async def crawling_async(session, url):
     headers = {
@@ -326,6 +328,7 @@ async def crawling_async(session, url):
     except Exception:
         return "error_exception"
 
+
 def screenshot_and_verify_sync(x, url):
     with sync_playwright() as p:
         try:
@@ -359,6 +362,7 @@ def screenshot_and_verify_sync(x, url):
             print(f"Playwright error: {e}")
             return "오류(시스템)"
 
+
 async def GPTclass_async(session, x, y):
     if "확인필요" in x:
         return "O"
@@ -372,8 +376,8 @@ async def GPTclass_async(session, x, y):
                 response = await aclient.chat.completions.create(
                     model=GPT_MODEL_TEXT,
                     messages=[
-                        {"role": "system", "content":"[[웹자료]]에서 내용이 주어진 [[정보]] 관련내용이 대략적으로 포함되어있으면 X, 관련내용이 아니거나, 빈페이지 또는 없는 페이지면 O 출력"},
-                        {"role": "user",  "content": f"[[정보]]: {x}, [[웹자료]] : {truncate_string(crawled_content)}"}
+                        {"role": "system", "content": "[[웹자료]]에서 내용이 주어진 [[정보]] 관련내용이 대략적으로 포함되어있으면 X, 관련내용이 아니거나, 빈페이지 또는 없는 페이지면 O 출력"},
+                        {"role": "user", "content": f"[[정보]]: {x}, [[웹자료]] : {truncate_string(crawled_content)}"}
                     ]
                 )
                 result = response.choices[0].message.content
@@ -388,6 +392,7 @@ async def GPTclass_async(session, x, y):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, screenshot_and_verify_sync, x, y)
     return result
+
 
 async def GPTcheck_async(doc):
     query = """
@@ -427,6 +432,7 @@ async def GPTcheck_async(doc):
             retries += 1
     return {"오류여부": "O(시스템오류)", "원문": doc}
 
+
 def separator(entry):
     parts = [""] * 4
     if 'http' in entry:
@@ -454,6 +460,7 @@ def separator(entry):
     else:
         parts[3] = ref_info
     return parts
+
 
 def process_entries_sync(entries):
     articles = []
@@ -483,8 +490,9 @@ def process_entries_sync(entries):
         })
     return pd.DataFrame(articles)
 
+
 # =========================
-# URL status check (UPDATED)
+# URL status check
 # - SSL 인증서 오류는 "SSL"로 반환(=정상(SSL 유의)로 표시)
 # - SSL 오류 시 ssl=False로 재시도하여 실제 접속 가능하면 SSL로 확정
 # =========================
@@ -500,7 +508,6 @@ async def check_url_status_async(session, url):
             return "X" if resp.status == 200 else "O"
 
     except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLCertVerificationError):
-        # 인증서 검증 실패(SSL 유의) -> 검증을 끄고 실제 접속 가능 여부 확인
         try:
             async with session.get(req_url, ssl=False, timeout=10, allow_redirects=True) as resp2:
                 return "SSL" if resp2.status == 200 else "O"
@@ -510,11 +517,13 @@ async def check_url_status_async(session, url):
     except Exception:
         return "O"
 
+
 async def task_with_progress(coro, progress_callback):
     result = await coro
     if progress_callback:
         progress_callback()
     return result
+
 
 async def process_all_async(entries, result_df, progress_callback=None):
     async with aiohttp.ClientSession() as session:
@@ -535,10 +544,11 @@ async def process_all_async(entries, result_df, progress_callback=None):
         n_url = len(result_df)
 
         gpt_format_results = all_results[:n_fmt]
-        url_status_results = all_results[n_fmt:n_fmt+n_url]
-        gpt_relevance_results = all_results[n_fmt+n_url:]
+        url_status_results = all_results[n_fmt:n_fmt + n_url]
+        gpt_relevance_results = all_results[n_fmt + n_url:]
 
         return gpt_format_results, url_status_results, gpt_relevance_results
+
 
 def main():
     st.title("연구보고서 온라인자료 검증도구")
@@ -653,9 +663,23 @@ def main():
 
         with col1:
             st.subheader("검증 결과 요약")
-            # ✅ URL 상태를 1열로
             display_columns = ['URL 상태', 'title', 'URL', 'GPT 형식체크', 'GPT 내용체크']
-            st.dataframe(df[display_columns])
+            summary_df = df[display_columns].copy()
+
+            # ✅ URL 상태 셀 색상(오류=빨강)
+            def highlight_url_status(val):
+                if val == "오류":
+                    return "background-color: #ffdce0; color: #d8000c; font-weight: 700;"
+                return ""
+
+            styled = summary_df.style.applymap(highlight_url_status, subset=["URL 상태"])
+
+            # Streamlit 버전에 따라 styler 지원이 다를 수 있어 fallback 처리
+            try:
+                st.dataframe(styled, use_container_width=True)
+            except Exception:
+                st.write(styled)
+
             if 'processed_data' in st.session_state and st.session_state.processed_data:
                 st.download_button(
                     label="엑셀 다운로드",
@@ -697,10 +721,10 @@ def main():
                     msg = str(row['GPT 내용체크'])
                     error_reasons.append("Content Irrelevant" if msg == "무관" else msg)
 
-                # 정보성 표시(SSL 유의) 문자열
+                # ✅ 정보성 표시(색상 지정 없음)
                 info_tooltip = " | ".join(info_reasons)
                 info_span = (
-                    f"<span style='font-size:0.8em; color:#0b5ed7; margin-left:6px;' "
+                    f"<span style='font-size:0.8em; margin-left:6px;' "
                     f"title='{info_tooltip}'>ℹ️ {info_tooltip}</span>"
                 ) if is_info else ""
 
@@ -715,7 +739,7 @@ def main():
                         f"</p>"
                     )
                 else:
-                    # ✅ SSL 유의만 있는 경우: 하이라이트 없이 정보 아이콘만
+                    # SSL 유의만 있는 경우: 하이라이트 없이 ℹ️만
                     html_content += (
                         f"<p style='margin-bottom: 8px; color: #333;'>"
                         f"{text}"
@@ -725,6 +749,7 @@ def main():
 
             html_content += "</div>"
             st.markdown(html_content, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
